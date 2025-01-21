@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from typing import Optional
 
 from core.agent.cot_agent_runner import CotAgentRunner
@@ -6,6 +7,7 @@ from core.model_runtime.entities.message_entities import (
     AssistantPromptMessage,
     PromptMessage,
     TextPromptMessageContent,
+    ToolPromptMessage,
     UserPromptMessage,
 )
 from core.model_runtime.utils.encoders import jsonable_encoder
@@ -35,20 +37,41 @@ class CotCompletionAgentRunner(CotAgentRunner):
         """
         Organize historic prompt
         """
-        historic_prompt_messages = self._organize_historic_prompt_messages(current_session_messages)
+        historic_prompt_messages = self.history_prompt_messages or []
         historic_prompt = ""
 
         for message in historic_prompt_messages:
             if isinstance(message, UserPromptMessage):
-                historic_prompt += f"Question: {message.content}\n\n"
+                if message.content is None:
+                    continue
+                if isinstance(message.content, str):
+                    historic_prompt += f"Question: {message.content}\n\n"
+                elif isinstance(message.content, Sequence):
+                    content_text = " ".join([
+                        content.data for content in message.content 
+                        if isinstance(content, TextPromptMessageContent)
+                    ])
+                    historic_prompt += f"Question: {content_text}\n\n"
             elif isinstance(message, AssistantPromptMessage):
+                if message.content is None:
+                    continue
                 if isinstance(message.content, str):
                     historic_prompt += message.content + "\n\n"
-                elif isinstance(message.content, list):
-                    for content in message.content:
-                        if not isinstance(content, TextPromptMessageContent):
-                            continue
-                        historic_prompt += content.data
+                elif isinstance(message.content, Sequence):
+                    content_text = " ".join([
+                        content.data for content in message.content 
+                        if isinstance(content, TextPromptMessageContent)
+                    ])
+                    historic_prompt += content_text + "\n\n"
+                elif isinstance(message.content, TextPromptMessageContent):
+                    historic_prompt += message.content.data + "\n\n"
+            elif isinstance(message, ToolPromptMessage):
+                if message.content is None:
+                    continue
+                if isinstance(message.content, str):
+                    historic_prompt += f"Tool Response: {message.content}\n\n"
+                elif isinstance(message.content, TextPromptMessageContent):
+                    historic_prompt += f"Tool Response: {message.content.data}\n\n"
 
         return historic_prompt
 
@@ -85,4 +108,4 @@ class CotCompletionAgentRunner(CotAgentRunner):
             .replace("{{query}}", query_prompt)
         )
 
-        return [UserPromptMessage(content=prompt)]
+        return [UserPromptMessage(content=[TextPromptMessageContent(data=prompt)])]
